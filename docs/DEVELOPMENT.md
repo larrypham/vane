@@ -197,6 +197,23 @@ VANE_UI_PERFORMANCE=1 swift test --filter SidebarViewportPerformanceTests.testPo
 This reports median, p95, and maximum forced layout cost. Layout work under 8.33 ms leaves CPU
 headroom for a 120 Hz display; these timings do not establish displayed frame rate.
 
+For the smaller sidebar path, the 22-tab retention fixture checks a seven-tab folder,
+hidden input anchors, row spacing, and control reuse while scrolling. The opt-in run
+also reports scroll layout timings:
+
+```sh
+VANE_UI_PERFORMANCE=1 swift test --filter SidebarRowRetentionTests
+```
+
+Sidebars with at most 40 tabs and folders retain unlocked row controls between disclosure
+changes. Larger outlines keep viewport-only mounting. This fixture uses parked local pages;
+use the affected profile and active website as well when investigating reported stutter.
+The native-host regression
+`SpaceNativeRenderingTests.testFolderDisclosureDefersHiddenSpacePreparationAndDisposal`
+uses the reported 26-tab outline with adjacent Spaces. It checks that hidden preview
+hosting trees are retired and rebuilt after folder disclosure settles, rather than
+competing with the input or animation frames.
+
 Search opening and typing diagnostics use the production native browser window with
 20 and 300 parked tabs. They report forced opening layout, the largest 2 ms input
 heartbeat gap during opening, and worst native field-edit/layout cost, without a CI
@@ -207,7 +224,7 @@ closes and its dismissal fade finishes.
 VANE_UI_PERFORMANCE=1 swift test --filter SearchPresentationPerformanceTests
 ```
 
-Folder-opening diagnostics report toggle time, forced layout, run-loop gaps, and
+Folder-opening diagnostics report toggle time, opening/closing layout, run-loop gaps, and
 mounted native tab controls for 20/300-tab folders. They also guard against repeated
 lock scans in an unprotected 3,000-tab strip:
 
