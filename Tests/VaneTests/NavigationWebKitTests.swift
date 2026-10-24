@@ -332,6 +332,87 @@ import XCTest
         XCTAssertEqual(tab.address, try server.url("/opener").absoluteString)
     }
 
+    func testPopupWithNoGestureIsBlockedAndOfferedUnlessTheSiteAllowsIt() async throws {
+        var opened = 0
+        var blocked: [URL?] = []
+        tab.onPopup = { _, _, _ in opened += 1; return nil }
+        tab.onPopupBlocked = { url, _ in blocked.append(url) }
+        defer { tab.onPopup = nil; tab.onPopupBlocked = nil; SitePermissions.resetAll(profileID: tab.profileID) }
+        tab.web.configuration.preferences.javaScriptCanOpenWindowsAutomatically = Popup.readsGesture
+        let page = "<title>Opener</title><script>window.open('/popup')</script>"
+        let base = try server.url("/opener")
+        // Block before anything has loaded: once Ask has shown a toast, the toast's own rate
+        // limit would hide a Block that wrongly showed one too.
+        let scope = try XCTUnwrap(SitePermissions.Scope(url: base, profileID: tab.profileID))
+        SitePermissions.set(scope: scope, type: .popups, answer: false)
+        tab.web.loadHTMLString(page, baseURL: base)
+        try await compatibilityWait { self.tab.title == "Opener" && !self.tab.loading }
+        XCTAssertEqual(opened, 0)
+        XCTAssertTrue(blocked.isEmpty, "Block drops the popup without a toast")
+
+        SiteControl.set(.popups, to: nil, on: tab)
+        tab.web.loadHTMLString(page, baseURL: base)
+        try await compatibilityWait { !blocked.isEmpty }
+        XCTAssertEqual(blocked, [try server.url("/popup")])
+        XCTAssertEqual(opened, 0)
+
+        SiteControl.set(.popups, to: true, on: tab)
+        tab.web.loadHTMLString(page, baseURL: base)
+        try await compatibilityWait { opened == 1 }
+        XCTAssertEqual(blocked.count, 1)
+    }
+
+    func testPageLeavingForAnAllowedSiteCannotBorrowItsPopupAllow() async throws {
+        var opened = 0
+        var blocked: [(URL?, SitePermissions.Scope?)] = []
+        tab.onPopup = { _, _, _ in opened += 1; return nil }
+        tab.onPopupBlocked = { blocked.append(($0, $1)) }
+        defer {
+            tab.onPopup = nil; tab.onPopupBlocked = nil
+            server.heldPaths.remove("/held")
+            SitePermissions.resetAll(profileID: tab.profileID)
+        }
+        tab.web.configuration.preferences.javaScriptCanOpenWindowsAutomatically = Popup.readsGesture
+        let allowed = try XCTUnwrap(SitePermissions.Scope(url: try server.url("/held"), profileID: tab.profileID))
+        SitePermissions.set(scope: allowed, type: .popups, answer: true)
+        server.heldPaths.insert("/held")
+        let page = """
+        <script>location.href = '\(try server.url("/held").absoluteString)'
+        setTimeout(() => window.open('/popup'), 300)</script>
+        """
+        tab.web.loadHTMLString(page, baseURL: URL(string: "https://leaving.example/")!)
+        try await compatibilityWait { !blocked.isEmpty }
+        XCTAssertEqual(opened, 0)
+        XCTAssertEqual(blocked.first?.1?.host, "leaving.example", "the toast names, and its Allow saves, the page that asked")
+    }
+
+    func testPageLeavingForAnotherOriginKeepsItsSilentPopupBlock() async throws {
+        var opened = 0
+        var blocked = 0
+        tab.onPopup = { _, _, _ in opened += 1; return nil }
+        tab.onPopupBlocked = { _, _ in blocked += 1 }
+        defer {
+            tab.onPopup = nil; tab.onPopupBlocked = nil
+            server.heldPaths.remove("/held")
+            SitePermissions.resetAll(profileID: tab.profileID)
+        }
+        tab.web.configuration.preferences.javaScriptCanOpenWindowsAutomatically = Popup.readsGesture
+        let leaving = try server.url("/blocked-opener")
+        let destination = try server.url("/held", host: "localhost")
+        let scope = try XCTUnwrap(SitePermissions.Scope(url: leaving, profileID: tab.profileID))
+        SitePermissions.set(scope: scope, type: .popups, answer: false)
+        server.heldPaths.insert("/held")
+        let page = """
+        <script>location.href = '\(destination.absoluteString)'
+        setTimeout(() => { window.open('/popup'); document.title = 'Popup attempted' }, 300)</script>
+        """
+        tab.web.loadHTMLString(page, baseURL: leaving)
+        try await compatibilityWait { self.tab.title == "Popup attempted" }
+        XCTAssertEqual(tab.web.url, destination, "the outgoing document is running behind a provisional destination")
+        XCTAssertEqual(opened, 0)
+        XCTAssertEqual(blocked, 0, "the outgoing document's Block remains silent while another origin loads")
+    }
+
     func testSupersededFailureAndFinishCannotReplaceCurrentDocumentOrWriteHistory() async throws {
         let old = try await load("/old")
         server.heldPaths.insert("/held")
