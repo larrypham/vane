@@ -88,7 +88,6 @@ enum FolderUnlockMethod: String, CaseIterable {
     static let key = "folderUnlockMethod"
 }
 
-/// The two answers the Links pane's "Open links from other apps in" offers.
 /// The clearance between the page card and the window edge, chosen in General settings.
 enum PageBorder: String, CaseIterable, Identifiable {
     case transparent, thin, regular
@@ -114,6 +113,7 @@ enum PageBorder: String, CaseIterable, Identifiable {
     }
 }
 
+/// The two answers the Links pane's "Open links from other apps in" offers.
 enum LinkTarget {
     static let key = "externalLinks"
     static let littleArc = "little"
@@ -492,7 +492,7 @@ private struct GeneralPane: View {
     @AppStorage("warnBeforeQuit") private var warnQuit = true
     @AppStorage("checkForUpdates") private var autoUpdate = true
     @AppStorage(InteractionSounds.preferenceKey) private var interactionSounds = false
-    @AppStorage(PageBorder.key) private var pageBorder = PageBorder.default.rawValue
+    @AppStorage(PageBorder.key, store: .vane) private var pageBorder = PageBorder.default.rawValue
     @State private var isDefault = URLHandling.isDefaultBrowser
 
     var body: some View {
